@@ -818,7 +818,12 @@ app.get("*splat", (_req, res) => {
   res.sendFile(path.join(distDir, "index.html"));
 });
 
-const httpServer = app.listen(PORT, () => {
+// HOST lets the writable game port bind to a specific interface. Unset = today's
+// behavior (listen(PORT, undefined, cb) binds every interface, reachable on LAN).
+// The Discord edition sets HOST=127.0.0.1 so the game answers only on loopback;
+// its sole public listener is then the read-only GET/HEAD proxy, which is what
+// makes tunnelling the live map safe (see the bot repo's spectator-proxy.mjs).
+const httpServer = app.listen(PORT, process.env.HOST || undefined, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
 

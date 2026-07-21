@@ -4,6 +4,7 @@ import ReactDOM from "react-dom";
 import ReactMarkdown from "react-markdown";
 import { sendDiplomaticMessage, startDiplomaticChat, loadDiplomaticHistory } from "../AI/main.jsx";
 import { chooseNextDiplomaticSpeaker } from "../AI/gameplay.js";
+import { isSpectator } from "../../runtime/spectator.js";
 import { Actions } from "./actions";
 import {
     JSON_URLS,
@@ -545,6 +546,7 @@ const ConversationView = ({ chat, playerCountry, gameDate, onArchive, onBack, on
         };
 
         const handlePlayerSubmit = async () => {
+            if (isSpectator()) return; // read-only: never send a diplomatic message
             const text = playerInput.trim();
             if (!text || isLoading) return;
             lastPlayerMessage.current = text;
@@ -631,7 +633,7 @@ const ConversationView = ({ chat, playerCountry, gameDate, onArchive, onBack, on
                 >Let {pendingCountry.name} speak →</button>
                 </div>
                 </div>
-            ) : phase === "player" && !isLoading ? (
+            ) : phase === "player" && !isLoading && !isSpectator() ? (
                 <div style={{ padding: "1rem", borderTop: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0 }}>
                 <textarea
                 placeholder="Send a diplomatic message…"

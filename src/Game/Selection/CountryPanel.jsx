@@ -7,6 +7,7 @@ import { resolveCountryTags } from "../../runtime/countryTags.js";
 import { readEventsState, readWorldState } from "../../runtime/gameState.js";
 import { requestDiplomaticChat } from "../GameUI/chat.jsx";
 import { generateCountryStats } from "../AI/gameplay.js";
+import { isSpectator } from "../../runtime/spectator.js";
 
 // Bridge: the region popup's info button opens this panel from outside React.
 let _openPanel = null;
@@ -145,6 +146,7 @@ const CountryInfoPanel = () => {
     if (!country) return null;
 
     const runAdvisorReport = async () => {
+        if (isSpectator()) return; // read-only: no AI-spending advisor report
         if (report === "loading") return;
         setReport("loading");
         try {
@@ -156,6 +158,7 @@ const CountryInfoPanel = () => {
     };
 
     const openDiplomacy = () => {
+        if (isSpectator()) return; // read-only: never open/write a chat
         requestDiplomaticChat({ name: country.name, code: country.code });
         setCountry(null);
     };
@@ -298,7 +301,9 @@ const CountryInfoPanel = () => {
         )}
         </div>
 
-        {/* Footer */}
+        {/* Footer — write actions (AI advisor report, open diplomacy), hidden for
+            read-only spectators. The read dossier above stays visible. */}
+        {!isSpectator() && (
         <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", display: "flex", gap: "0.6rem", padding: "0.8rem 1.1rem" }}>
         <button type="button" onClick={runAdvisorReport} style={footerButtonStyle}>
         Advisor Report
@@ -307,6 +312,7 @@ const CountryInfoPanel = () => {
         Open Diplomacy
         </button>
         </div>
+        )}
         </div>,
         document.body,
     );

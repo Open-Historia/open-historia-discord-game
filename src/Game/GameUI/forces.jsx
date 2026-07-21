@@ -11,6 +11,7 @@ import {
 } from "../Map/unitsController.js";
 import { UNIT_TYPES } from "../../runtime/gameState.js";
 import { ensurePolityNames, polityDisplayName } from "../../runtime/polityNames.js";
+import { isSpectator } from "../../runtime/spectator.js";
 
 const TYPE_LABEL = {
   infantry: "Infantry",
@@ -134,6 +135,7 @@ export const ForcesPanel = ({ mapRef, topOffset = "0px", open = false, onToggle 
   );
 
   const startDeploy = () => {
+    if (isSpectator()) return; // read-only: never enter deploy interaction mode
     const name = deployName.trim() || `${TYPE_LABEL[deployType]} ${myUnits.length + 1}`;
     setInteractionMode({
       kind: "deploy",
@@ -204,7 +206,8 @@ export const ForcesPanel = ({ mapRef, topOffset = "0px", open = false, onToggle 
             </button>
           </div>
 
-          {/* Deploy controls */}
+          {/* Deploy controls — hidden for read-only spectators (unit lists + flyTo below stay). */}
+          {!isSpectator() && (
           <div style={{ background: "rgba(255,255,255,0.05)", borderRadius: "8px", padding: "8px", marginBottom: "10px" }}>
             <div style={{ fontSize: "11px", color: "rgba(255,255,255,0.6)", marginBottom: "6px" }}>Deploy a unit</div>
             <div style={{ display: "flex", gap: "5px", marginBottom: "6px" }}>
@@ -243,6 +246,7 @@ export const ForcesPanel = ({ mapRef, topOffset = "0px", open = false, onToggle 
               Place on map →
             </button>
           </div>
+          )}
 
           <div style={{ overflowY: "auto", flex: 1 }}>
             <div style={{ fontSize: "11px", color: "rgba(255,255,255,0.6)", margin: "0 0 5px" }}>

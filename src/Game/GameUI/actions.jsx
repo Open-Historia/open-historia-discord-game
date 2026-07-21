@@ -5,6 +5,7 @@ import advancedFormat from "dayjs/plugin/advancedFormat";
 import { JSON_URLS, readJson } from "../../runtime/assets.js";
 import { useCountryDisplayName } from "../../runtime/polityNames.js";
 import { generateActionSuggestions, refinePlayerAction } from "../AI/gameplay.js";
+import { isSpectator } from "../../runtime/spectator.js";
 import { revertUnitOrder } from "../Map/unitsController.js";
 import {
     buildActionDisplayText,
@@ -301,6 +302,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
     );
 
     const handleSubmit = async () => {
+        if (isSpectator()) return; // read-only: never queue an action
         const trimmed = inputValue.trim();
         if (!trimmed || isSubmitting || isImproving) {
             return;
@@ -321,6 +323,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
     };
 
     const handleImprove = async () => {
+        if (isSpectator()) return; // read-only: no AI action refinement
         const trimmed = inputValue.trim();
         if (!trimmed || isImproving || isSubmitting) {
             return;
@@ -369,6 +372,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
     };
 
     const refreshSuggestions = async () => {
+        if (isSpectator()) return; // read-only: no AI suggestion generation
         if (isSuggesting) {
             return;
         }
@@ -593,6 +597,9 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
         </div>
         </div>
 
+        {/* Compose bar (enter/improve/submit an action) — hidden for read-only
+            spectators; the planned-actions list above stays viewable. */}
+        {!isSpectator() && (
         <div
         style={{
             alignItems: "center",
@@ -693,6 +700,7 @@ const ActionsPanel = ({ isOpen, onClose, onOpenAdvisor }) => {
         {isSubmitting ? <SpinnerRing size={14} /> : <SendIcon />}
         </button>
         </div>
+        )}
         </div>
     );
 };

@@ -23,6 +23,7 @@ import { setWorldStateOverride } from "../Map/useWorldState.js";
 import { setUnitsOverride } from "../Map/unitsController.js";
 import { useIsMobile } from "../../runtime/useIsMobile.js";
 import { MAP_SETTING_KEYS, useMapSetting } from "../../runtime/mapSettings.js";
+import { isSpectator } from "../../runtime/spectator.js";
 
 dayjs.extend(advancedFormat);
 
@@ -1254,6 +1255,7 @@ const DateWidget = ({
     const [undoCount, setUndoCount] = useState(0);
     const openPanel = typeof onSetPanel === "function" ? activePanel : localOpenPanel;
     const isMobile = useIsMobile();
+    const spectator = isSpectator();
     const disableEventCamera = useMapSetting(MAP_SETTING_KEYS.disableEventCamera);
 
     useEffect(() => {
@@ -1389,6 +1391,7 @@ const DateWidget = ({
     }
 
     const runJump = async (days, mode = "jump") => {
+        if (isSpectator()) return; // read-only: never simulate/mutate
         if (!gameData || days == null || isLoading) {
             return;
         }
@@ -1441,6 +1444,7 @@ const DateWidget = ({
     }, [gameData?.round]);
 
     const runUndo = async () => {
+        if (isSpectator()) return; // read-only: never roll back (a write)
         if (isLoading || undoCount <= 0) {
             return;
         }
@@ -1725,6 +1729,7 @@ const DateWidget = ({
         )}
         </div>
 
+        {!spectator && (
         <button
         type="button"
         style={{
@@ -1752,6 +1757,7 @@ const DateWidget = ({
         >
         {isLoading ? <SpinnerRing size={15} tone="rgba(196,165,255,0.95)" /> : "\u00BB"}
         </button>
+        )}
         </div>
         </>
     );

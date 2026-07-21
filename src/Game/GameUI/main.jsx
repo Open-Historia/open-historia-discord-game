@@ -8,6 +8,7 @@ import { Other } from "./other";
 import { Toolbar } from "./chat";
 import { Search } from "./search";
 import { ForcesPanel } from "./forces";
+import { isSpectator } from "../../runtime/spectator.js";
 import {
   getStoredProvider,
   loadProviderSettingsFormState,
@@ -117,6 +118,7 @@ const Main = ({
   setIsGlobeEnabled,
   setIsTerrainEnabled,
 }) => {
+  const spectator = isSpectator();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCheatsOpen, setIsCheatsOpen] = useState(false);
   const [shouldLoadCheats, setShouldLoadCheats] = useState(false);
@@ -244,24 +246,30 @@ const Main = ({
       />
       <Other rightShift={rightShift} />
       <Search mapRef={mapRef} />
-      <ForcesPanel
-        mapRef={mapRef}
-        topOffset={TOP_BAR_OFFSET}
-        open={isForcesOpen}
-        onToggle={() => setIsForcesOpen((v) => !v)}
-      />
-      <AdvisorButton
-        isAdvisorOpen={isAdvisorOpen}
-        rightShift={rightShift}
-        onToggle={() => setIsAdvisorOpen(!isAdvisorOpen)}
-      />
+      {/* Forces (deploy), Advisor (game-master commands) and Cheats are all
+          write-only affordances — hidden for read-only spectators. */}
+      {!spectator && (
+        <ForcesPanel
+          mapRef={mapRef}
+          topOffset={TOP_BAR_OFFSET}
+          open={isForcesOpen}
+          onToggle={() => setIsForcesOpen((v) => !v)}
+        />
+      )}
+      {!spectator && (
+        <AdvisorButton
+          isAdvisorOpen={isAdvisorOpen}
+          rightShift={rightShift}
+          onToggle={() => setIsAdvisorOpen(!isAdvisorOpen)}
+        />
+      )}
       <Suspense fallback={null}>
-        {shouldLoadAdvisor && (
+        {!spectator && shouldLoadAdvisor && (
           <LazyAdvisorPanel isAdvisorOpen={isAdvisorOpen} onClose={() => setIsAdvisorOpen(false)} />
         )}
       </Suspense>
       <Suspense fallback={null}>
-        {shouldLoadCheats && (
+        {!spectator && shouldLoadCheats && (
           <LazyCheatsPanel open={isCheatsOpen} onClose={() => setIsCheatsOpen(false)} onOpenForces={() => { setIsCheatsOpen(false); setIsForcesOpen(true); }} />
         )}
       </Suspense>

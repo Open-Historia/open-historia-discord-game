@@ -41,6 +41,7 @@ import {
   embedScenarioBundleVector,
 } from "../../runtime/communityBasemaps.js";
 import { zipBundle, unzipBundle, looksLikeZip } from "../../runtime/bundleZip.js";
+import { isSpectator } from "../../runtime/spectator.js";
 
 const UNIT_TYPE_LABELS = {
   infantry: "Infantry",
@@ -1392,6 +1393,7 @@ const LibraryTopBar = () => {
   // Play an existing game from the menu: close the menu (module flag first —
   // the activation remounts the UI) and activate. Reopen only on failure.
   const handleGameActivate = async (gameId) => {
+    if (isSpectator()) return; // read-only: never switch the active game
     setMenuOpen(false);
     try {
       await activateGame(gameId);
@@ -1404,6 +1406,7 @@ const LibraryTopBar = () => {
   // Blank scenario from the menu's + tile: create (seeded server-side from the
   // default scenario) and drop straight into its editor, above the menu.
   const handleCreateScenario = async () => {
+    if (isSpectator()) return; // read-only
     setEditorError(null);
     setIsBusy(true);
     try {
@@ -1538,6 +1541,7 @@ const LibraryTopBar = () => {
   };
 
   const handleDelete = async () => {
+    if (isSpectator()) return; // read-only
     if (!editorDetails || !editorKind) {
       return;
     }
@@ -1660,6 +1664,7 @@ const LibraryTopBar = () => {
   };
 
   const handleImportScenarioFile = async (event) => {
+    if (isSpectator()) { event.target.value = ""; return; } // read-only
     const [file] = Array.from(event.target.files ?? []);
     event.target.value = "";
 
@@ -1719,6 +1724,7 @@ const LibraryTopBar = () => {
   const [serverDown, setServerDown] = useState(false);
 
   const handleShutdownServer = async () => {
+    if (isSpectator()) return; // read-only: covers every ⏻ render site at once
     if (!window.confirm("Shut down the Open Historia server? The game stops for everyone connected to it.")) {
       return;
     }
@@ -2022,7 +2028,7 @@ const LibraryTopBar = () => {
           {/* Shut the server down (phones/Termux have no terminal handy). Hidden
               on the hosted website (web build) — there's no local server to stop
               there, and the compile-time flag strips this from that bundle. */}
-          {!import.meta.env.VITE_OH_WEB && (
+          {!import.meta.env.VITE_OH_WEB && !isSpectator() && (
             <button
               onClick={handleShutdownServer}
               title="Exit: shut down the Open Historia server"
@@ -2069,7 +2075,7 @@ const LibraryTopBar = () => {
           >
             ⌂
           </button>
-          {!import.meta.env.VITE_OH_WEB && (
+          {!import.meta.env.VITE_OH_WEB && !isSpectator() && (
             <button
               onClick={handleShutdownServer}
               title="Exit: shut down the Open Historia server"
@@ -2355,7 +2361,7 @@ const LibraryTopBar = () => {
                   {isMobile ? "⬆" : "Import JSON"}
                 </button>
               )}
-              {!import.meta.env.VITE_OH_WEB && (
+              {!import.meta.env.VITE_OH_WEB && !isSpectator() && (
                 <button
                   onClick={handleShutdownServer}
                   title="Exit: shut down the Open Historia server"

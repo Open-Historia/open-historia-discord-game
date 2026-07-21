@@ -15,6 +15,7 @@ import {
   runStartupPreload,
 } from "./runtime/preload.js";
 import { ensureLibraryCatalog, useLibraryState } from "./runtime/library.js";
+import { isSpectator } from "./runtime/spectator.js";
 
 const WorldShell = {
   backgroundColor: "#000",
@@ -201,9 +202,13 @@ function GameApp({ bot = false, externalMapRef = null, onFirstWorldIdle } = {}) 
 }
 
 // Standalone modes are isolated behind URL flags so the real game is untouched:
-//   ?bot=1     -> the headless bot host (Discord edition): renders the real game
-//                 and installs the window.oh control surface the bridge drives
-//   ?editor=1  -> the OpenLayers map editor (author custom maps)
+//   ?bot=1        -> the headless bot host (Discord edition): renders the real
+//                    game and installs the window.oh control surface the bridge drives
+//   ?editor=1     -> the OpenLayers map editor (author custom maps)
+//   ?spectator=1  -> read-only spectator (Discord live map): the SAME GameApp,
+//                    but write controls self-hide via isSpectator(). Cosmetic
+//                    only — the enforced boundary is the loopback bind + read-only
+//                    proxy (see runtime/spectator.js).
 // Flags are read once at render time, so hook order stays consistent.
 function App() {
   const params =
@@ -223,6 +228,12 @@ function App() {
         <MapEditor />
       </Suspense>
     );
+  }
+  // Spectator is NOT a component swap — the viewer needs the full live map + UI.
+  // Prime the flag and expose a CSS hook; every write control self-hides via
+  // isSpectator() in the descendant HUD components.
+  if (typeof document !== "undefined" && isSpectator()) {
+    document.body.dataset.spectator = "1";
   }
   return <GameApp />;
 }

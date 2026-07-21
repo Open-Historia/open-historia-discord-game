@@ -25,6 +25,7 @@ import { loadCountryLabelCollections } from "../../runtime/countryLabels.js";
 import { translateLabel } from "../../runtime/translator.js";
 import { MAP_SETTING_KEYS, useMapSetting } from "../../runtime/mapSettings.js";
 import { useWorldState } from "./useWorldState.js";
+import { isSpectator } from "../../runtime/spectator.js";
 
 ensurePmtilesProtocol();
 const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] };
@@ -588,29 +589,34 @@ const WorldMap = ({ isGlobe = false }) => {
     const mode = getInteractionMode();
 
     // Active troop command modes intercept the click as a target, not a selection.
-    if (mode.kind === "deploy") {
-      deployUnit({ ...mode.params, lng: event.lngLat.lng, lat: event.lngLat.lat });
-      clearInteractionMode();
-      return;
-    }
-    if (mode.kind === "move") {
-      moveUnitTo(mode.unitId, event.lngLat.lng, event.lngLat.lat);
-      clearInteractionMode();
-      return;
-    }
-    if (mode.kind === "attack") {
-      // An enemy unit under the cursor is the target; otherwise a city or
-      // structure is — troops can be directed against objectives, not just
-      // other troops.
-      const target = unitsAt();
-      const feature = target.length ? null : featureAt();
-      if (target.length) {
-        attackWith(mode.unitId, target[0].properties.id);
-      } else if (feature) {
-        attackFeature(mode.unitId, feature);
+    // Read-only spectators never issue troop commands — fall straight through to
+    // the inspect/selection path below (defense-in-depth: deploy/move/attack are
+    // already unreachable for them since those launchers are hidden).
+    if (!isSpectator()) {
+      if (mode.kind === "deploy") {
+        deployUnit({ ...mode.params, lng: event.lngLat.lng, lat: event.lngLat.lat });
+        clearInteractionMode();
+        return;
       }
-      clearInteractionMode();
-      return;
+      if (mode.kind === "move") {
+        moveUnitTo(mode.unitId, event.lngLat.lng, event.lngLat.lat);
+        clearInteractionMode();
+        return;
+      }
+      if (mode.kind === "attack") {
+        // An enemy unit under the cursor is the target; otherwise a city or
+        // structure is — troops can be directed against objectives, not just
+        // other troops.
+        const target = unitsAt();
+        const feature = target.length ? null : featureAt();
+        if (target.length) {
+          attackWith(mode.unitId, target[0].properties.id);
+        } else if (feature) {
+          attackFeature(mode.unitId, feature);
+        }
+        clearInteractionMode();
+        return;
+      }
     }
 
     // Normal selection: a unit click wins over the region beneath it.
