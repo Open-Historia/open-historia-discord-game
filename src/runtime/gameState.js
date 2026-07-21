@@ -16,6 +16,12 @@ export const WORLD_DEFAULTS = {
   actionSuggestions: [],
   activeCatalyst: null,
   consolidatedHistory: [],
+  // Extra human-controlled polities beyond the primary game.country (Discord
+  // edition, WORKSTREAM B). Polity NAMES, verbatim, in the same namespace as
+  // polityOverrides / internationalReputation keys. Empty = single-player, and
+  // every consumer treats an empty roster as "just game.country", so the whole
+  // engine stays byte-identical for a normal game.
+  factionNations: [],
   // Per-polity international reputation (0-100), evolved by the AI each turn via
   // polityChanges and fed back into prompts. Authoritative, unlike the on-demand
   // stat sheet it was first read from.
@@ -147,6 +153,9 @@ export const normalizeActionEntry = (entry, index = 0) => {
       createdAt: new Date().toISOString(),
       id: generateId(`action-${index}`),
       kind: "action",
+      // Empty ownerNation = the primary nation (game.country), resolved at read
+      // time — so legacy single-player actions never need migration.
+      ownerNation: "",
       participants: [],
       rawInput: text,
       source: "manual",
@@ -183,6 +192,9 @@ export const normalizeActionEntry = (entry, index = 0) => {
     id: normalizeOptionalString(entry.id) || generateId(`action-${index}`),
     invitees: normalizeActionParticipants(entry.invitees),
     kind,
+    // Which human faction queued this order (Discord edition). Empty = the
+    // primary nation (game.country); legacy actions stay valid untouched.
+    ownerNation: normalizeOptionalString(entry.ownerNation || entry.owner || entry.nation),
     participants: normalizeActionParticipants(entry.participants),
     rawInput: rawInput || text || title,
     source: normalizeOptionalString(entry.source) || "manual",
@@ -853,10 +865,20 @@ export const normalizeWorldState = (world) => {
       .filter(([country, list]) => country && list.length),
   );
 
+  // Human-controlled faction roster (Discord edition). Dedupe and cap so a
+  // malformed roster can never explode prompt size or reassign an order to a
+  // nonexistent nation. Empty stays empty (single-player).
+  const factionNations = normalizeArray(nextWorld.factionNations)
+    .map((name) => normalizeOptionalString(name))
+    .filter(Boolean)
+    .filter((name, index, list) => list.indexOf(name) === index)
+    .slice(0, 16);
+
   return {
     ...WORLD_DEFAULTS,
     ...nextWorld,
     countryTags,
+    factionNations,
     actionSuggestions: normalizeActionSuggestions(nextWorld.actionSuggestions),
     activeCatalyst: normalizeCatalyst(nextWorld.activeCatalyst),
     consolidatedHistory: normalizeConsolidatedHistory(nextWorld.consolidatedHistory),

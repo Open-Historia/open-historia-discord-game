@@ -7,6 +7,7 @@ import {
   buildChatSummaryText,
   buildDetailedChatHistoryText,
   buildEventHistoryText,
+  buildFactionOrdersMap,
   buildPromptContext,
   getUnconsolidatedEvents,
   renderTemplate,
@@ -409,8 +410,18 @@ const runJsonTask = async (taskKey, {
   // "the AI just makes events saying that you form a treaty with another
   // country ... it just doesn't give you a choice and makes it an event."
   if (["jumpForward", "autoJumpForward"].includes(taskKey)) {
-    const playerName = normalizeString(variables.playerPolity) || "the player's polity";
-    systemPrompt = `${systemPrompt}\n\n[Player Agency]\n${playerName} is controlled by a human player. Never commit ${playerName} to a major decision the player did not actually make: do not sign treaties, alliances, ceasefires, surrenders, trade pacts, unions, or other binding agreements on the player's behalf, do not accept or reject offers for them, and do not have ${playerName} take landmark unilateral action (declaring war, ceding territory, changing government) unless it directly executes one of the player's planned actions, chat replies, or explicit requests. When another polity seeks such an agreement or decision from the player, present it as something the player can answer: a diplomaticOutreach entry or an impacts.createdChats chat where the counterpart speaks first and makes the proposal, or an event describing the offer as OPEN and awaiting the player's response. Events remain free to narrate what other polities do among themselves and to resolve the player's own queued actions exactly as ordered.`;
+    // Discord edition: with more than one human-controlled nation, the guard
+    // widens to protect EVERY human faction and to route faction-vs-faction
+    // agreements back to the players as open offers. With one (or none) it is
+    // byte-identical to the original single-polity directive above.
+    const humans = normalizeArray(variables.humanNations).map(normalizeString).filter(Boolean);
+    if (humans.length > 1) {
+      const list = humans.join(", ");
+      systemPrompt = `${systemPrompt}\n\n[Player Agency — Multiple Human Nations]\n${list} are ALL controlled by human players. Their planned orders are grouped by nation under "ORDERS FOR <nation>" headers. (1) Honor and resolve each nation's OWN grouped orders for that nation only. (2) NEVER reassign, swap, or credit one nation's order to another human nation. (3) For ANY of these human nations, never sign treaties, alliances, ceasefires, surrenders, unions, or trade pacts, never declare war on their behalf, and never cede, annex, or hand over their territory — UNLESS that same nation's OWN grouped orders explicitly direct it, or it is the direct military outcome of a war that nation is already fighting. (4) When one human nation seeks an agreement or decision FROM another human nation, do NOT resolve it yourself: surface it as an OPEN diplomaticOutreach entry (or an impacts.createdChats chat) whose speaker is the INITIATING human nation making the proposal, so the recipient's players can answer it, and set impacts.actionIds to the initiator's originating order. Events remain free to narrate what non-human polities do among themselves and to resolve each human nation's own queued orders exactly as given.`;
+    } else {
+      const playerName = normalizeString(variables.playerPolity) || "the player's polity";
+      systemPrompt = `${systemPrompt}\n\n[Player Agency]\n${playerName} is controlled by a human player. Never commit ${playerName} to a major decision the player did not actually make: do not sign treaties, alliances, ceasefires, surrenders, trade pacts, unions, or other binding agreements on the player's behalf, do not accept or reject offers for them, and do not have ${playerName} take landmark unilateral action (declaring war, ceding territory, changing government) unless it directly executes one of the player's planned actions, chat replies, or explicit requests. When another polity seeks such an agreement or decision from the player, present it as something the player can answer: a diplomaticOutreach entry or an impacts.createdChats chat where the counterpart speaks first and makes the proposal, or an event describing the offer as OPEN and awaiting the player's response. Events remain free to narrate what other polities do among themselves and to resolve the player's own queued actions exactly as ordered.`;
+    }
   }
 
   // Reputation context: how the world currently regards the player, and how the
@@ -747,22 +758,26 @@ const fallbackNextSpeaker = ({ chat, excludedSpeaker }) => {
   };
 };
 
-export const buildGeneratedChat = async (chatLike, linkEventId, world, { fallbackTitle = "", playerName = "" } = {}) => {
+export const buildGeneratedChat = async (chatLike, linkEventId, world, { fallbackTitle = "", playerName = "", playerNames = [] } = {}) => {
   const countriesInput = Array.isArray(chatLike?.countries) ? chatLike.countries : [];
   const countries = await resolveInvitees(countriesInput, world);
   if (countries.length === 0) return null;
 
-  // The initiating polity speaks first — and it is never the player. When the
-  // model names no speaker (or names the player), attribute the opener to the
-  // first non-player participant.
-  const playerKey = normalizeString(playerName).toUpperCase();
+  // The initiating polity speaks first. In a single-human game that opener is
+  // never the player. In a multi-human (Discord) game one human faction CAN open
+  // a chat to another, so honor a model-NAMED speaker even when it is human —
+  // only the fallback (no/blank named speaker) still prefers a non-player, so
+  // the engine never puts unsolicited words in a human faction's mouth.
+  const playerKeys = new Set(
+    [playerName, ...normalizeArray(playerNames)].map((n) => normalizeString(n).toUpperCase()).filter(Boolean),
+  );
   const matchesPlayer = (country) =>
-    playerKey && (normalizeString(country.name).toUpperCase() === playerKey || normalizeString(country.code).toUpperCase() === playerKey);
+    playerKeys.has(normalizeString(country.name).toUpperCase()) || playerKeys.has(normalizeString(country.code).toUpperCase());
   const speakerKey = normalizeString(chatLike?.speaker).toUpperCase();
+  const namedSpeaker = countries.find((country) =>
+    speakerKey && (normalizeString(country.name).toUpperCase() === speakerKey || normalizeString(country.code).toUpperCase() === speakerKey));
   const initiator =
-    countries.find((country) =>
-      speakerKey && !matchesPlayer(country)
-      && (normalizeString(country.name).toUpperCase() === speakerKey || normalizeString(country.code).toUpperCase() === speakerKey))
+    namedSpeaker
     ?? countries.find((country) => !matchesPlayer(country))
     ?? countries[0];
 
@@ -981,15 +996,61 @@ const validateChatOpener = (chatLike, path) => {
 // ops are DROPPED in place instead ("$.events[4].impacts.unitOps[0].unitId
 // does not identify an existing unit" used to trash whole good turns to the
 // canned fallback over one stale id).
-export const validateGeneratedWorldChanges = async (candidate, world, { strictTransfers = false } = {}) => {
+export const validateGeneratedWorldChanges = async (
+  candidate,
+  world,
+  { strictTransfers = false, humanNations = [], factionOrders = {} } = {},
+) => {
   const strict = strictTransfers;
   const containers = Array.isArray(candidate?.events)
-    ? candidate.events.map((event, index) => ({ impacts: event?.impacts, path: `$.events[${index}].impacts` }))
-    : [{ impacts: candidate?.impacts, path: "$.impacts" }];
+    ? candidate.events.map((event, index) => ({ impacts: event?.impacts, event, path: `$.events[${index}].impacts` }))
+    : [{ impacts: candidate?.impacts, event: candidate, path: "$.impacts" }];
   const unresolvedTransfers = await resolveRegionTransfers(containers, world);
   if (strict && unresolvedTransfers.length > 0) {
     return buildTransferFeedback(unresolvedTransfers);
   }
+
+  // Attribution safety net (Discord edition — MULTI-NATION games only). Never let
+  // the model cede a HUMAN faction's territory unless that faction's OWN orders
+  // authorize it, or it is the military outcome of a war (the event/transfer
+  // reads as combat). Otherwise a faction would silently lose land to an
+  // AI-invented "treaty" it never agreed to. A single-human game keeps this net
+  // OFF, so its events stay byte-identical — the [Player Agency] prompt directive
+  // is its guard. Strict attempt: reject with a corrective message (the model
+  // reroutes it as an open offer); final attempt: drop the cession, keep the turn.
+  const humans = normalizeArray(humanNations).map((n) => normalizeString(n)).filter(Boolean);
+  if (humans.length > 1) {
+    const humanByKey = new Map(humans.map((n) => [n.toUpperCase(), n]));
+    const cessionWords = /(cede|ceded|surrender|hand over|handed over|give up|gave up|relinquish|withdraw from|transfer|cession|grant)/i;
+    const combatWords = /(war|battle|invad|offensive|assault|captur|seiz|conquer|conquest|annex|occup|defeat|overr|storm|siege|besieg|front|militar|troops|army|forces|fighting|combat|fell to|routed|advanc|liberat|repel)/i;
+    const authorizesCession = (nation) => cessionWords.test(normalizeString(factionOrders?.[nation]));
+    const world0 = normalizeWorldState(world);
+    for (const { impacts, event, path } of containers) {
+      const transfers = normalizeArray(impacts?.regionTransfers);
+      if (!transfers.length) continue;
+      const contextText = `${normalizeString(event?.title)} ${normalizeString(event?.description)} ${normalizeString(event?.summary)}`;
+      const keptTransfers = [];
+      for (let i = 0; i < transfers.length; i += 1) {
+        const t = transfers[i];
+        const loserRaw =
+          normalizeString(t?.fromCode) ||
+          normalizeString(world0.regionOwnershipOverrides?.[normalizeString(t?.regionId)]);
+        const loser = humanByKey.get(loserRaw.toUpperCase());
+        if (loser) {
+          const combat = combatWords.test(`${contextText} ${normalizeString(t?.note)}`);
+          if (!authorizesCession(loser) && !combat) {
+            if (strict) {
+              return `${path}.regionTransfers[${i}] cedes territory away from ${loser}, a human-controlled nation, but ${loser}'s own orders do not authorize it and no war explains the loss. Do NOT resolve it: surface the proposal as an OPEN diplomaticOutreach entry for ${loser}'s players to answer, and drop this transfer.`;
+            }
+            continue; // salvage: drop the unauthorized cession, keep the rest of the turn
+          }
+        }
+        keptTransfers.push(t);
+      }
+      if (impacts && Array.isArray(impacts.regionTransfers)) impacts.regionTransfers = keptTransfers;
+    }
+  }
+
   const unitIds = new Set(normalizeWorldState(world).units.map((unit) => normalizeString(unit.id)).filter(Boolean));
   const generatedPolities = [];
   for (const { impacts } of containers) generatedPolities.push(...normalizeArray(impacts?.polityChanges));
@@ -1320,11 +1381,17 @@ const applySimulationResult = async ({
   });
   let nextWorld = worldWithImpacts;
 
+  // Every human-controlled faction (Discord edition), so a chat opened BY one
+  // human faction toward another keeps the initiator as speaker instead of the
+  // engine speaking for a player. Single-player => just [game.country].
+  const humanNations = [normalizeString(baseGame.country), ...normalizeWorldState(baseWorld).factionNations].filter(Boolean);
+
   for (const event of generatedEvents) {
     for (const createdChat of event.impacts.createdChats) {
       const nextChat = await buildGeneratedChat(createdChat, event.id, worldWithImpacts, {
         fallbackTitle: event.title,
         playerName: baseGame.country,
+        playerNames: humanNations,
       });
       if (nextChat) nextChats.unshift(nextChat);
     }
@@ -1336,6 +1403,7 @@ const applySimulationResult = async ({
   for (const chatLike of normalizeArray(result.outreach)) {
     const nextChat = await buildGeneratedChat({ ...chatLike, source: "outreach" }, "", worldWithImpacts, {
       playerName: baseGame.country,
+      playerNames: humanNations,
     });
     if (nextChat) nextChats.unshift(nextChat);
   }
@@ -1554,7 +1622,7 @@ export const generateCountryStatSheet = async ({ code, name } = {}) => {
   return payload;
 };
 
-export const refinePlayerAction = async (rawInput, { persist = true } = {}) => {
+export const refinePlayerAction = async (rawInput, { persist = true, ownerNation = "" } = {}) => {
   const bundle = await readGameStateBundle({ force: true });
   const variables = await buildTemplateVariables(bundle, { actionInput: rawInput });
   const { payload } = await runJsonTask("descriptionToAction", {
@@ -1568,6 +1636,8 @@ export const refinePlayerAction = async (rawInput, { persist = true } = {}) => {
     chatStarter: normalizeString(payload?.chatStarter),
     invitees,
     kind: normalizeString(payload?.kind).toLowerCase() === "chat" ? "chat" : "action",
+    // Which human faction queued this order (Discord edition; "" = primary).
+    ownerNation: normalizeString(ownerNation),
     rawInput,
     source: "manual",
     status: "planned",
@@ -1590,6 +1660,7 @@ export const refinePlayerAction = async (rawInput, { persist = true } = {}) => {
 export const chooseNextDiplomaticSpeaker = async ({
   chat,
   excludeSpeaker = "",
+  humanNations = [],
 } = {}) => {
   const bundle = await readGameStateBundle({ force: true });
   const normalizedChat = normalizeChats([chat])[0];
@@ -1616,7 +1687,27 @@ export const chooseNextDiplomaticSpeaker = async ({
     normalizedChat.countries.find((country) => country.name.toLowerCase() === nextSpeaker.toLowerCase()) ??
     normalizedChat.countries.find((country) => country.name !== excludeSpeaker);
 
-  return validSpeaker?.name || "";
+  const chosen = validSpeaker?.name || "";
+  // Discord edition: never auto-generate a line for a human-controlled nation —
+  // return "" so the caller hands the turn to that faction's players to answer.
+  // Derive the human set from the bundle (primary + world.factionNations) so the
+  // browser chat UI needs no change; an explicit humanNations arg extends it.
+  const humanKeys = new Set(
+    [
+      ...normalizeArray(humanNations),
+      normalizeString(bundle.game?.country),
+      ...normalizeWorldState(bundle.world).factionNations,
+    ]
+      .map((n) => normalizeString(n).toUpperCase())
+      .filter(Boolean),
+  );
+  // Only relevant when more than one nation is human-controlled: in a normal
+  // single-player game the original behavior is preserved exactly (the player
+  // never appears as an AI counterpart's next speaker anyway).
+  if (humanKeys.size > 1 && chosen && humanKeys.has(chosen.toUpperCase())) {
+    return "";
+  }
+  return chosen;
 };
 
 export const consolidateRecentHistory = async ({ limit = 12 } = {}) => {
@@ -1873,7 +1964,11 @@ export const simulateTimelineJump = async ({ days, mode = "jump", signal } = {})
         if (strict) return dateError;
         clampTimelineDates(candidate, { mode, originDate, targetDate });
       }
-      return await validateGeneratedWorldChanges(candidate, bundle.world, { strictTransfers: strict });
+      return await validateGeneratedWorldChanges(candidate, bundle.world, {
+        strictTransfers: strict,
+        humanNations: normalizeArray(variables.humanNations),
+        factionOrders: buildFactionOrdersMap(bundle),
+      });
     },
     variables,
   });
@@ -2117,6 +2212,7 @@ export const maybeSendIdleDiplomacy = async ({ chance = IDLE_DIPLOMACY_CHANCE } 
     if (isSimulationBusy()) return null;
     const built = await buildGeneratedChat({ ...payload.chat, source: "outreach" }, "", bundle.world, {
       playerName: bundle.game.country,
+      playerNames: [normalizeString(bundle.game.country), ...normalizeWorldState(bundle.world).factionNations].filter(Boolean),
     });
     if (!built) return null;
     const chats = normalizeChats(await readChatsState({ force: true }));

@@ -337,6 +337,9 @@ const eventSchema = {
       type: "boolean",
       description: "Whether the event directly concerns the player polity.",
     },
+    actorCode: textSchema(
+      "Discord edition: polity name/code of the human faction whose grouped order this event carries out, when the event resolves a specific nation's queued order. Optional and advisory.",
+    ),
     impacts: impactsSchema,
   },
   required: ["date", "title", "description"],

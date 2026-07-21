@@ -162,6 +162,54 @@ export const formatActionsForPrompt = (actions) => normalizeArray(actions)
   .filter(Boolean)
   .join("\n");
 
+// The human faction roster for a bundle: the primary game.country first, then
+// any world.factionNations, deduped. One member (or none) = single-player.
+export const resolveHumanNations = (bundle) => {
+  const primary = normalizeString(bundle?.game?.country);
+  const extras = normalizeWorldState(bundle?.world).factionNations;
+  return [primary, ...normalizeArray(extras).map(normalizeString)]
+    .filter(Boolean)
+    .filter((name, index, list) => list.indexOf(name) === index);
+};
+
+// Discord edition: group this round's PLANNED orders by the human faction that
+// queued them, under one "ORDERS FOR <nation>" header each, so a single jump can
+// resolve every faction's own orders without the model mixing them up. Wording
+// per line matches buildActionHistoryText's planned-order format exactly, so the
+// only difference from the single-player path is the per-nation grouping.
+export const buildFactionOrdersText = (bundle) => {
+  const roster = resolveHumanNations(bundle);
+  const primary = roster[0] || "the player's polity";
+  const planned = normalizeActions(bundle?.actions).filter((action) => action.status === "planned");
+  const groups = new Map(roster.map((nation) => [nation, []]));
+  for (const action of planned) {
+    const owner = normalizeString(action.ownerNation) || primary;
+    if (!groups.has(owner)) groups.set(owner, []);
+    const kindLabel = action.kind === "chat" ? "chat" : "action";
+    groups.get(owner).push(`- (${kindLabel}) ${action.title}: ${buildActionDisplayText(action)}`);
+  }
+  return [...groups.entries()]
+    .map(([nation, lines]) =>
+      `ORDERS FOR ${nation} (human-controlled):\n${lines.length ? lines.join("\n") : "- (no orders queued this round)"}`)
+    .join("\n\n");
+};
+
+// Per-nation order text as a plain map (nation -> its grouped order lines), for
+// the attribution safety net's cession keyword scan in gameplay.js.
+export const buildFactionOrdersMap = (bundle) => {
+  const roster = resolveHumanNations(bundle);
+  const primary = roster[0] || "";
+  const planned = normalizeActions(bundle?.actions).filter((action) => action.status === "planned");
+  const map = {};
+  for (const nation of roster) map[nation] = "";
+  for (const action of planned) {
+    const owner = normalizeString(action.ownerNation) || primary;
+    const line = `${action.title}: ${buildActionDisplayText(action)}`;
+    map[owner] = map[owner] ? `${map[owner]}\n${line}` : line;
+  }
+  return map;
+};
+
 export const formatDateReadable = (value) => {
   const parsed = dayjs(value);
   return parsed.isValid() ? parsed.format("D MMMM YYYY") : normalizeString(value);
@@ -409,6 +457,13 @@ export const buildPromptContext = async (bundle, {
   const unconsolidatedChats = normalizeChats(bundle.chats)
     .filter((entry) => !consolidatedChatIds.has(entry.id));
   const currentChat = normalizedChat ?? unconsolidatedChats[0] ?? null;
+  // Human faction roster (Discord edition). >1 => group planned orders by nation
+  // so a single jump resolves each faction's own orders; <=1 keeps the original
+  // single-player output byte-for-byte. humanNations is consumed by the call-time
+  // agency guard in gameplay.js (not referenced by any template, so renderTemplate
+  // ignores it harmlessly).
+  const humanNations = resolveHumanNations(bundle);
+  const multiNation = humanNations.length > 1;
 
   return {
     actionInput,
@@ -442,7 +497,9 @@ export const buildPromptContext = async (bundle, {
     lastSpeaker: currentChat?.messages?.at(-1)?.speaker || "",
     markersSummary: buildMarkersSummaryText(bundle.world),
     numberOfRegions: String(regionCatalog.length),
-    plannedActions: buildActionHistoryText(bundle.actions),
+    factionNationsList: humanNations.join(", "),
+    humanNations,
+    plannedActions: multiNation ? buildFactionOrdersText(bundle) : buildActionHistoryText(bundle.actions),
     playerBattalionSummaries: buildUnitsSummaryText(bundle.world),
     playerPolity: bundle.game.country || "Unknown polity",
     playerPolityRegions: await buildPlayerPolityRegionsText(bundle, regionCatalog),
