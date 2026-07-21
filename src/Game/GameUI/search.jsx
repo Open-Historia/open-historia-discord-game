@@ -71,6 +71,11 @@ const fetchPlaces = async (query, limit, { signal } = {}) => {
   return results;
 };
 
+// Named export so the bot bridge (BotHost.captureMap) can geocode a place string
+// through the SAME cached, header-set, rate-limited path the search box uses —
+// no duplicate request logic. Pure visibility widening; the component is unchanged.
+export const geocodePlace = (query, limit = 1, opts) => fetchPlaces(query, limit, opts);
+
 const ICON_GLOBE = (
   <svg
     width="14"

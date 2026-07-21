@@ -169,7 +169,7 @@ const buildWorldStyle = (basemapId, customBg, backgroundDeclared, isGlobe) => {
   };
 };
 
-function World({ mapRef, projection, terrainEnabled, onInitialIdle }) {
+function World({ mapRef, projection, terrainEnabled, onInitialIdle, preserveDrawingBuffer = false }) {
   const hasReportedInitialIdleRef = useRef(false);
   const [loading, setLoading] = useState(false);
   const loadTimerRef = useRef(null);
@@ -286,6 +286,11 @@ function World({ mapRef, projection, terrainEnabled, onInitialIdle }) {
       <Map
         key={projection}
         ref={mapRef}
+        // Bot mode only (default false): keep the WebGL drawing buffer so the
+        // headless bridge's map.getCanvas().toDataURL() reads back real pixels
+        // instead of a cleared/blank frame. Construction-time option, so it costs
+        // the normal game nothing.
+        preserveDrawingBuffer={preserveDrawingBuffer}
         initialViewState={viewStateRef.current}
         minZoom={2.25}
         maxZoom={16}

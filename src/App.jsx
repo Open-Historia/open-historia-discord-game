@@ -5,6 +5,9 @@ import UI from "./Game/GameUI/main.jsx";
 
 // Lazy so OpenLayers is only fetched when the editor is actually opened.
 const MapEditor = lazy(() => import("./Editor/MapEditor.jsx"));
+// Lazy so the headless-bot bridge code (window.oh + map capture) is only fetched
+// when the game is opened in ?bot=1 mode — the normal game never loads it.
+const BotHost = lazy(() => import("./runtime/BotHost.jsx"));
 import StartupScreen from "./runtime/StartupScreen.jsx";
 import {
   STARTUP_TIME_BUDGET_MS,
@@ -32,8 +35,13 @@ const Vignette = {
   zIndex: 10,
 };
 
-function GameApp() {
-  const mapRef = useRef(null);
+// All props optional with internal fallbacks, so <GameApp /> (the normal render
+// path) behaves exactly as before. The headless bot host (?bot=1) passes bot to
+// force a readable WebGL buffer, externalMapRef to own the map handle, and
+// onFirstWorldIdle to learn when the live MapLibre map is ready to instrument.
+function GameApp({ bot = false, externalMapRef = null, onFirstWorldIdle } = {}) {
+  const internalMapRef = useRef(null);
+  const mapRef = externalMapRef || internalMapRef;
   const preloadStartedAtRef = useRef(null);
   const preloadFinishedRef = useRef(false);
   const worldIdleRef = useRef(false);
@@ -147,6 +155,9 @@ function GameApp() {
     if (preloadFinishedRef.current) {
       setIsReady(true);
     }
+
+    // Tell a bot host the live map handle is ready (no-op in the normal game).
+    onFirstWorldIdle?.(mapRef);
   };
 
   const startupOverlayState = useMemo(() => {
@@ -167,6 +178,7 @@ function GameApp() {
     <Map
     key={`map-${activeGameId || "default"}`}
     mapRef={mapRef}
+    preserveDrawingBuffer={bot}
     projection={isGlobeEnabled ? "globe" : "mercator"}
     terrainEnabled={isTerrainEnabled}
     onInitialIdle={handleFirstWorldIdle}
@@ -189,6 +201,8 @@ function GameApp() {
 }
 
 // Standalone modes are isolated behind URL flags so the real game is untouched:
+//   ?bot=1     -> the headless bot host (Discord edition): renders the real game
+//                 and installs the window.oh control surface the bridge drives
 //   ?editor=1  -> the OpenLayers map editor (author custom maps)
 // Flags are read once at render time, so hook order stays consistent.
 function App() {
@@ -196,6 +210,13 @@ function App() {
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search)
       : new URLSearchParams();
+  if (params.has("bot")) {
+    return (
+      <Suspense fallback={<div style={{ position: "fixed", inset: 0, background: "#0b1020" }} />}>
+        <BotHost />
+      </Suspense>
+    );
+  }
   if (params.has("editor")) {
     return (
       <Suspense fallback={<div style={{ position: "fixed", inset: 0, background: "#0b1020" }} />}>
@@ -206,4 +227,5 @@ function App() {
   return <GameApp />;
 }
 
+export { GameApp };
 export default App;
