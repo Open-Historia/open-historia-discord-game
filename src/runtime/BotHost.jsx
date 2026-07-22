@@ -432,8 +432,46 @@ function installOhSurface(map, mapReadyPromise) {
           fitWorld(); // no usable target -> show the whole world, not wherever the camera sat
         }
       }
-      await waitForIdle(map);
-      return map.getCanvas().toDataURL("image/png");
+      // Settle ROBUSTLY. 'idle' can fire before the new view actually paints —
+      // the basemap tiles for a fresh zoom/position are still loading (or ESRI
+      // errored them) — which returned a blank/transparent PNG. Wait for idle,
+      // confirm the canvas has real content, and retry a few times; then ALWAYS
+      // composite the frame over an opaque ocean so a missing/partial basemap can
+      // never yield a fully transparent image.
+      const hasContent = () => {
+        try {
+          const cvs = map.getCanvas();
+          const s = document.createElement("canvas");
+          s.width = 24;
+          s.height = 24;
+          const ctx = s.getContext("2d");
+          ctx.clearRect(0, 0, 24, 24);
+          ctx.drawImage(cvs, 0, 0, 24, 24);
+          const d = ctx.getImageData(0, 0, 24, 24).data;
+          let opaque = 0;
+          for (let i = 3; i < d.length; i += 4) if (d[i] > 10) opaque += 1;
+          return opaque > 24 * 24 * 0.2; // >20% opaque = the frame painted
+        } catch {
+          return true; // can't check — assume it's fine
+        }
+      };
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await waitForIdle(map, 4000);
+        if (attempt === 4 || hasContent()) break;
+        await new Promise((r) => {
+          map.triggerRepaint?.();
+          setTimeout(r, 400);
+        });
+      }
+      const src = map.getCanvas();
+      const out = document.createElement("canvas");
+      out.width = src.width;
+      out.height = src.height;
+      const octx = out.getContext("2d");
+      octx.fillStyle = "#0b1a2b"; // opaque ocean/space, so the PNG is never transparent
+      octx.fillRect(0, 0, out.width, out.height);
+      octx.drawImage(src, 0, 0);
+      return out.toDataURL("image/png");
     },
   };
 
