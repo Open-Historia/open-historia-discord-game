@@ -16,6 +16,7 @@ import {
 } from "./runtime/preload.js";
 import { ensureLibraryCatalog, useLibraryState } from "./runtime/library.js";
 import { isSpectator } from "./runtime/spectator.js";
+import { installRafPump } from "./runtime/rafPump.js";
 
 const WorldShell = {
   backgroundColor: "#000",
@@ -231,9 +232,12 @@ function App() {
   }
   // Spectator is NOT a component swap — the viewer needs the full live map + UI.
   // Prime the flag and expose a CSS hook; every write control self-hides via
-  // isSpectator() in the descendant HUD components.
+  // isSpectator() in the descendant HUD components. The render pump is inert in a
+  // normal foreground tab (native rAF) and only engages if the view is hidden or
+  // embedded — so a thumbnail/Activity render of the live map still paints.
   if (typeof document !== "undefined" && isSpectator()) {
     document.body.dataset.spectator = "1";
+    installRafPump();
   }
   return <GameApp />;
 }

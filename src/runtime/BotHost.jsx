@@ -45,8 +45,10 @@ import { installRafPump } from "./rafPump.js";
 
 // Install the headless render pump the moment the bot chunk loads — before
 // GameApp mounts the MapLibre map — so the map renders and reaches 'idle' even
-// though a headless/background page has requestAnimationFrame paused.
-installRafPump();
+// though a headless/background page has requestAnimationFrame paused. force:true
+// because Playwright's page is never actually watched and is unreliable about
+// reporting visibility.
+installRafPump({ force: true });
 
 // --- serialization -----------------------------------------------------------
 // Every mutating oh.* call runs through this single promise chain, so the bot

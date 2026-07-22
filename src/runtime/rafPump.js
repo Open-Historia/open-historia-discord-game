@@ -1,18 +1,30 @@
 /*! Open Historia — Discord edition: headless render pump. © 2026 Nicholas Krol, MIT (see src/Editor/LICENSE). */
-// Bot mode only. A hidden/background tab — Playwright's headless Chromium, an
-// offscreen iframe — pauses requestAnimationFrame. That freezes MapLibre's
-// render loop: tiles never finish decoding, the map never emits 'idle', the
-// first-world-idle hook never fires (so window.oh never installs), and
-// getCanvas().toDataURL() reads back a blank frame. A MessageChannel is NOT
-// throttled by page visibility, so we drive frames through one instead. Frames
-// are only pumped while callbacks are queued, so a settled map costs nothing.
+// A hidden/background page — Playwright's headless Chromium (the bot bridge), an
+// offscreen iframe, an embedded live-map view — pauses requestAnimationFrame.
+// That freezes MapLibre's render loop: tiles never finish, the map never emits
+// 'idle', and it reads back blank. A MessageChannel is NOT throttled by page
+// visibility, so we drive frames through one instead.
+//
+// Two callers, two policies:
+//   - Bot bridge  (force: true)  -> ALWAYS pump. Playwright is unreliable about
+//     visibility/rAF, and the page is never actually watched, so vsync is moot.
+//   - Spectator   (force: false) -> pump ONLY while document.hidden. A real
+//     spectator watching in a foreground tab keeps native, vsync-paced rAF; a
+//     hidden/embedded render still gets frames.
+// Frames are only pumped while callbacks are queued, so a settled map costs nothing.
 let installed = false;
+// Namespace our ids well above native rAF ids so cancelAnimationFrame can tell
+// which mechanism a handle came from.
+const ID_BASE = 1e9;
 
-export function installRafPump() {
+export function installRafPump({ force = false } = {}) {
   if (installed || typeof window === "undefined" || typeof MessageChannel === "undefined") {
     return;
   }
   installed = true;
+
+  const nativeRaf = typeof window.requestAnimationFrame === "function" ? window.requestAnimationFrame.bind(window) : null;
+  const nativeCancel = typeof window.cancelAnimationFrame === "function" ? window.cancelAnimationFrame.bind(window) : null;
 
   const channel = new MessageChannel();
   let queue = [];
@@ -38,18 +50,21 @@ export function installRafPump() {
         /* one bad frame callback must not stop the pump */
       }
     }
-    // Callbacks that requested another frame (a continuing animation, more tiles
-    // to draw) queued into the fresh array — keep pumping until it drains.
     if (queue.length) pump();
   };
 
+  // Delegate to real vsync-paced rAF when we can (spectator, foreground tab).
+  const canUseNative = () => !force && nativeRaf && typeof document !== "undefined" && !document.hidden;
+
   window.requestAnimationFrame = (cb) => {
-    const id = nextId++;
+    if (canUseNative()) return nativeRaf(cb);
+    const id = ID_BASE + nextId++;
     queue.push({ id, cb });
     pump();
     return id;
   };
   window.cancelAnimationFrame = (id) => {
-    queue = queue.filter((entry) => entry.id !== id);
+    if (id >= ID_BASE) queue = queue.filter((entry) => entry.id !== id);
+    else if (nativeCancel) nativeCancel(id);
   };
 }
