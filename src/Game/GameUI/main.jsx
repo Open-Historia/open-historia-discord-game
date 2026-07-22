@@ -9,6 +9,40 @@ import { Toolbar } from "./chat";
 import { Search } from "./search";
 import { ForcesPanel } from "./forces";
 import { isSpectator } from "../../runtime/spectator.js";
+import { readGameData } from "../../runtime/gameState.js";
+
+// A minimal read-only "who / when" pill for Discord live-map spectators — the
+// only chrome they get. Polls the shared game state so the date advances live as
+// the bot resolves rounds, with no interactive controls.
+function SpectatorPill() {
+  const [info, setInfo] = useState({ country: "", date: "" });
+  useEffect(() => {
+    let active = true;
+    const tick = async () => {
+      try {
+        const g = await readGameData({ force: true });
+        if (active) setInfo({ country: g.country || "", date: g.gameDate || "" });
+      } catch {
+        /* keep the last known values */
+      }
+    };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => { active = false; clearInterval(id); };
+  }, []);
+  if (!info.date) return null;
+  return (
+    <div style={{
+      position: "fixed", top: "0.6rem", left: "50%", transform: "translateX(-50%)", zIndex: 20,
+      background: "rgba(10,14,25,0.72)", color: "rgba(255,255,255,0.92)", padding: "0.4rem 0.95rem",
+      borderRadius: 999, fontSize: "0.82rem", fontWeight: 600, letterSpacing: "0.02em",
+      pointerEvents: "none", backdropFilter: "blur(6px)", border: "1px solid rgba(255,255,255,0.08)",
+      whiteSpace: "nowrap", maxWidth: "90vw", overflow: "hidden", textOverflow: "ellipsis",
+    }}>
+      {info.country ? `${info.country} · ` : ""}{info.date}
+    </div>
+  );
+}
 import {
   getStoredProvider,
   loadProviderSettingsFormState,
@@ -230,22 +264,32 @@ const Main = ({
   return (
     <>
       {showWebGLWarning && <WebGLWarningPopup />}
-      <LibraryTopBar />
-      <DateWidget
-        activePanel={activeBottomPanel}
-        mapRef={mapRef}
-        onSetPanel={setActiveBottomPanel}
-        onTogglePanel={toggleBottomPanel}
-        rightShift={rightShift}
-        topOffset={TOP_BAR_OFFSET}
-      />
-      <Toolbar
-        onOpenAdvisor={openAdvisor}
-        activePanel={activeBottomPanel}
-        onTogglePanel={toggleBottomPanel}
-      />
-      <Other rightShift={rightShift} />
-      <Search mapRef={mapRef} />
+      {/* Discord live-map spectators get a bare view: just the map plus a
+          read-only date/nation indicator. Everything interactive — the library/
+          session top bar, the toolbar (chat/events/actions), the settings menu,
+          and search — is hidden. */}
+      {!spectator && <LibraryTopBar />}
+      {spectator ? (
+        <SpectatorPill />
+      ) : (
+        <DateWidget
+          activePanel={activeBottomPanel}
+          mapRef={mapRef}
+          onSetPanel={setActiveBottomPanel}
+          onTogglePanel={toggleBottomPanel}
+          rightShift={rightShift}
+          topOffset={TOP_BAR_OFFSET}
+        />
+      )}
+      {!spectator && (
+        <Toolbar
+          onOpenAdvisor={openAdvisor}
+          activePanel={activeBottomPanel}
+          onTogglePanel={toggleBottomPanel}
+        />
+      )}
+      {!spectator && <Other rightShift={rightShift} />}
+      {!spectator && <Search mapRef={mapRef} />}
       {/* Forces (deploy), Advisor (game-master commands) and Cheats are all
           write-only affordances — hidden for read-only spectators. */}
       {!spectator && (
@@ -273,11 +317,13 @@ const Main = ({
           <LazyCheatsPanel open={isCheatsOpen} onClose={() => setIsCheatsOpen(false)} onOpenForces={() => { setIsCheatsOpen(false); setIsForcesOpen(true); }} />
         )}
       </Suspense>
+      {!spectator && (
       <SettingsButton
         topOffset={TOP_BAR_OFFSET}
         onToggle={() => setIsSettingsOpen(!isSettingsOpen)}
       />
-      {isSettingsOpen && (
+      )}
+      {!spectator && isSettingsOpen && (
         <SettingsMenu
           discordUrl="https://discord.gg/C3AVwHacZ4"
           redditUrl="https://www.reddit.com/r/OpenHistoria"
