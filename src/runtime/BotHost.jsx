@@ -386,11 +386,23 @@ function installOhSurface(map, mapReadyPromise) {
     // World via GameApp's bot prop) or the canvas reads back blank. Prefers a
     // crisp fitBounds when the region's geometry is in loaded tiles; otherwise
     // geocodes the place name and flyTo's it.
-    captureMap: async ({ region, country, zoom = 4, center } = {}) => {
+    captureMap: async ({ region, country, zoom = 4, center, world } = {}) => {
       await mapReadyPromise;
       const target = region || country || "";
+      // Fit all inhabited latitudes so every country shows (trims Antarctica and
+      // the empty polar caps). Used for world:true and as the no-target default.
+      // The game caps minZoom at 2.25 for play; at that cap only ~half the globe
+      // fits, so drop the floor first (bot map is capture-only) and let fitBounds
+      // zoom out enough for the whole world.
+      const fitWorld = () => {
+        if (map.getMinZoom() > 1) map.setMinZoom(1);
+        map.fitBounds([[-179, -56], [179, 78]], { padding: 2, duration: 0 });
+      };
       let framed = false;
-      if (region) {
+      if (world) {
+        fitWorld();
+        framed = true;
+      } else if (region) {
         try {
           const cat = await loadRegionCatalog();
           const hit = cat.find((r) => r.name?.toLowerCase() === String(region).toLowerCase());
@@ -411,11 +423,13 @@ function installOhSurface(map, mapReadyPromise) {
             const [hit] = await geocodePlace(target, 1);
             if (hit) c = [Number(hit.lon), Number(hit.lat)];
           } catch {
-            /* no geocode — capture the current view */
+            /* no geocode — fall back to the world view below */
           }
         }
         if (c && Number.isFinite(c[0]) && Number.isFinite(c[1])) {
           map.flyTo({ center: c, zoom, duration: 0, essential: true });
+        } else {
+          fitWorld(); // no usable target -> show the whole world, not wherever the camera sat
         }
       }
       await waitForIdle(map);
